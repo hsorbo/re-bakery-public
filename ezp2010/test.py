@@ -4,6 +4,7 @@ import usb.core
 import usb.util
 import struct
 import time
+import binascii
 
 VID = 0x10c4
 PID = 0xf5a0
@@ -26,6 +27,78 @@ voltage = {
     3: 0x00,
     5: 0x01
 }
+
+
+def db_read_entries(filename: str):
+    f = open(filename, 'rb')
+    f.seek(0x64)
+    while True:
+        data = f.read(0x6C)
+        if len(data) == 0:
+            break
+        yield data
+    f.close()
+
+
+def mystisk(type, size, should_mystisk, eet):
+    if type == 0:
+        mystisk_lo = 3  # lowbyte
+    elif type == 1:
+        if (should_mystisk != 0xfe):
+            mystisk_lo = 36 if size > 0x800 else 20  # lowbyte
+        else:
+            mystisk_lo = 4  # lowbyte
+    elif type == 2:
+        mystisk_lo = 17 if size > 0x200 else 1  # lowbyte
+    elif type == 3:
+        mystisk_lo = 16 * eet | 8
+    return mystisk_lo
+
+
+def parse_entry(entry: bytes):
+    (type, prod, vend, unk1, voltage, size, unk2, should_mystisk, eet, unk3) = struct.unpack(
+        'I 40s 20s c b 2x I 7s B B 3s 24x', entry)
+    return {
+        'type': type,
+        'prod': prod,
+        'vend': vend,
+        'unk1': unk1,
+        'voltage': voltage,
+        'size': size,
+        'unk2': unk2,
+        'should_mystisk': should_mystisk,
+        'eet': eet,
+        'unk3': unk3
+    }
+
+
+def db_dump():
+    for w in db_read_entries('database/DateBase.bin'):
+        (type, prod, vend, unk1, voltage, size, unk2, should_mystisk, eet, unk3) = struct.unpack(
+            'I 40s 20s c b 2x I 7s B B 3s 24x', w)
+        # volt: 0x55 -> 85 -> 65
+        # size: 0x58 -> 88 -> 68
+        # should_mystisk: 0x63 -> 99 -> 79
+        chip_voltage_is5v = False if type == 0 else voltage > 0x28
+
+        cats = ["spi ", "ee24", "ee25", 'ee93']
+        chip_category = cats[type]
+        mystisk_lo = mystisk(type, size, should_mystisk, eet)
+
+        # muligens fucka etter byte 64
+        prod = prod.decode('ascii').replace('\0', '')
+        vend = vend.decode('ascii').replace('\0', '')
+        print(
+            binascii.b2a_hex(unk1),
+            binascii.b2a_hex(unk2),
+            binascii.b2a_hex(unk3),
+            f'type: {type}',
+            f'cat: {chip_category}',
+            f'mys_lo: {hex(mystisk_lo)}',
+            f'is5v: {chip_voltage_is5v}',
+            f'size: {size}\t',
+            f'name: {vend}/{prod}',
+        )
 
 
 def usb_open(vid, pid):
@@ -176,9 +249,10 @@ def read(fin, fout, rom, size):
 
 
 if __name__ == '__main__':
-    (fout, fin) = usb_open(VID, PID)
+    db_dump()
+    #(fout, fin) = usb_open(VID, PID)
     # version(fin, fout)
     # serial(fin, fout)
     # selftest(fin, fout)
-    read(fin, fout, '24XX', 64*1024)
+    #read(fin, fout, '24XX', 64*1024)
     # read(fin, fout, '24XX', 16)
