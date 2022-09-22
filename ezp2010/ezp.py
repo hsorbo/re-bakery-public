@@ -40,64 +40,69 @@ def db_read_entries(filename: str):
     f.close()
 
 
-def mystisk(type, size, should_mystisk, eet):
+def mystisk(type, size, should_mystisk, eet, ee93_bits):
     if type == 0:
-        mystisk_lo = 3  # lowbyte
+        return [0x03, 0x00]
     elif type == 1:
         if (should_mystisk != 0xfe):
-            mystisk_lo = 36 if size > 0x800 else 20  # lowbyte
+            return [36 if size > 0x800 else 20, 0x00]
         else:
-            mystisk_lo = 4  # lowbyte
+            return [0x04, 0x00]
     elif type == 2:
-        mystisk_lo = 17 if size > 0x200 else 1  # lowbyte
+        return [17 if size > 0x200 else 1, 0x00]
     elif type == 3:
-        mystisk_lo = 16 * eet | 8
-    return mystisk_lo
+        return [16 * eet | 8, 3 if ee93_bits == 8 else 1]
 
 
 def parse_entry(entry: bytes):
-    (type, prod, vend, unk1, voltage, size, unk2, should_mystisk, eet, unk3) = struct.unpack(
-        'I 40s 20s c b 2x I 7s B B 3s 24x', entry)
+    (type, prod, vend, unk1, voltage, size, unk2, should_mystisk, eet, ee93_bits, b, c) = struct.unpack(
+        'I 40s 20s c b 2x I 7s B B B B B 24x', entry)
+    # volt: 0x55 -> 85 -> 65
+    # size: 0x58 -> 88 -> 68
+    # should_mystisk: 0x63 -> 99 -> 79
     return {
         'type': type,
-        'prod': prod,
-        'vend': vend,
+        'prod': prod.decode('ascii').replace('\0', ''),
+        'vend': vend.decode('ascii').replace('\0', ''),
         'unk1': unk1,
         'voltage': voltage,
         'size': size,
         'unk2': unk2,
         'should_mystisk': should_mystisk,
         'eet': eet,
-        'unk3': unk3
+        'ee93_bits': ee93_bits,
+        'b': b,
+        'c': c
     }
+
+
+entries = [parse_entry(x) for x in db_read_entries('database/DateBase.bin')]
 
 
 def db_dump():
     for w in db_read_entries('database/DateBase.bin'):
-        (type, prod, vend, unk1, voltage, size, unk2, should_mystisk, eet, unk3) = struct.unpack(
-            'I 40s 20s c b 2x I 7s B B 3s 24x', w)
-        # volt: 0x55 -> 85 -> 65
-        # size: 0x58 -> 88 -> 68
-        # should_mystisk: 0x63 -> 99 -> 79
+
+        entry = parse_entry(w)
         chip_voltage_is5v = False if type == 0 else voltage > 0x28
 
         cats = ["spi ", "ee24", "ee25", 'ee93']
-        chip_category = cats[type]
-        mystisk_lo = mystisk(type, size, should_mystisk, eet)
+        chip_category = cats[entry['type']]
+        mystisk_lo = mystisk(
+            entry['type'], entry['size'], entry['should_mystisk'], entry['eet'])
 
         # muligens fucka etter byte 64
         prod = prod.decode('ascii').replace('\0', '')
         vend = vend.decode('ascii').replace('\0', '')
         print(
-            binascii.b2a_hex(unk1),
-            binascii.b2a_hex(unk2),
-            binascii.b2a_hex(unk3),
+            binascii.b2a_hex(entry['unk1']),
+            binascii.b2a_hex(entry['unk2']),
+            binascii.b2a_hex(entry['unk3']),
             f'type: {type}',
             f'cat: {chip_category}',
             f'mys_lo: {hex(mystisk_lo)}',
             f'is5v: {chip_voltage_is5v}',
-            f'size: {size}\t',
-            f'name: {vend}/{prod}',
+            f"size: {entry['size']}\t",
+            f"name: {entry['vend']}/{entry['prod']}",
         )
 
 
@@ -186,49 +191,33 @@ def write(fin, fout, rom, data: bytes):
     pass
 
 
-def read(fin, fout, rom, size):
-    # 24XX
-    #  0  1  2  3  4  5  6  7  8  9  a  b  c  d  e
-    # 11 0a 02 00 00 00 00 00 00 00 10 14 00 01 00 <-  16b MIC24LC00
-    # 11 0a 02 00 00 00 00 00 00 01 00 14 00 01 00 <- 256b AT24C02
-    # 11 0a 02 00 00 00 00 00 00 04 00 14 01 00 00 <-   1k 24C08 3V
-    # 11 0a 02 00 00 00 00 00 00 08 00 14 00 01 00 <-   2k MIC24LC16B
-    # 11 0a 02 00 00 00 00 00 00 08 00 14 00 01 00 <-   2k AT24C16
-    # 11 0a 02 00 00 00 00 00 00 10 00 24 01 00 00 <-   4k 24C32 3V
-    # 11 0a 02 00 00 00 00 00 00 20 00 24 00 01 00 <-   8k ST24C64
-    # 11 0a 02 00 00 00 00 00 00 20 00 24 00 00 00 <-   8k 24C64 3V
-    # 11 0a 02 00 00 00 00 00 00 20 00 24 00 01 00 <-   8k 24C64 5V
-    # 11 0a 02 00 00 00 00 00 00 40 00 24 00 01 00 <-  16k MIC24LC128
-    # 11 0a 02 00 00 00 00 00 00 80 00 24 00 01 00 <-  32k MIC24LC256
-    # 11 0a 02 00 00 00 00 00 01 00 00 24 00 01 00 <-  64k MIC24LC512
-    # 11 0a 02 00 00 00 00 00 01 00 00 24 00 01 00 <-  64k MIC24FC512
-    # 11 0a 02 00 00 00 00 00 01 00 00 24 00 01 00 <-  64k AT24C512A
-    # 11 0a 02 00 00 00 00 00 02 00 00 24 00 01 00 <- 128k MIC24AA1024
-    # 25XX
-    # 11 0a 03 00 00 00 00 00 00 00 80 01 00 01 00 <- 128b 25010
-    # 11 0a 03 00 00 00 00 00 00 02 00 01 00 01 00 <- 512b 25040
-    # 11 0a 03 00 00 00 00 00 00 04 00 11 00 01 00 <-   1k 25080
-    # 11 0a 03 00 00 00 00 00 00 20 00 11 00 01 00 <-   8k 25640
-    # 11 0a 03 00 00 00 00 00 00 40 00 11 00 01 00 <-  16k 25128
-    # 93XX
-    # 11 0a 04 00 00 00 00 00 00 08 00 a8 01 01 00 <- 1Kx16b 93C86
-    # SPI
-    # 11 0a 01 00 00 00 00 00 01 00 00 03 01 00 00 <-  64k 25X512
-    # 11 0a 01 00 00 00 00 00 10 00 00 03 00 00 00 <-   1M W25X80L
-    # 11 0a 01 00 00 00 00 00 40 00 00 03 00 00 00 <-   4M AT25DF321
-    # 11 0a 01 00 00 00 00 01 00 00 00 03 00 00 00 <-  16M W25Q128BV
+def db_get_is5v(db_entry):
+    return False if db_entry['type'] == 0 else db_entry['voltage'] > 0x28
 
+
+def create_read_cmd(db_entry):
+    m = mystisk(db_entry['type'],
+                db_entry['size'],
+                db_entry['should_mystisk'],
+                db_entry['eet'],
+                db_entry['ee93_bits'])
+    # In EZP2010.exe byte at 0xc can get "stuck" to 0x01 (normally 0x00)
+    # when selecting a 93eeprom and then another eeprom category.
+    x = CMD_READ +\
+        [db_entry['type']+1] +\
+        [0x00, 0x00, 0x00, 0x00] + \
+        list(struct.pack('>i', db_entry['size'])) +\
+        m +\
+        [0x01 if db_get_is5v(db_entry) else 0x00] +\
+        [0x00]
+    return bytes(x)
+
+
+def read(fin, fout, db_entry):
     # resp: 11 01 00: OK
     # resp: 11 01 02: Read chip error!
-    TODO = [0x24, 0x00]
-    cmd = CMD_READ +\
-        [rom_type[rom]] +\
-        [0x00, 0x00, 0x00, 0x00] + \
-        list(struct.pack('>i', size)) +\
-        TODO +\
-        [voltage[3]] +\
-        [0x00]
-    fout.write(cmd)
+    size = db_entry['size']
+    fout.write(create_read_cmd(db_entry))
     time.sleep(SLEEP)
     resp = fin.read(3).tobytes()
     if resp == bytes([0x11, 0x01, 0x00]):
