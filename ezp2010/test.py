@@ -8,6 +8,11 @@ import time
 VID = 0x10c4
 PID = 0xf5a0
 CMD_READ = [0x11, 0x0a]
+CMD_WRITE = [0x12, 0x0c]
+CMD_DETECT = [0x15, 0x00]
+CMD_VERSION = [0x17, 0x00]
+CMD_SERIAL = [0x18, 0x00]
+CMD_SELF_TEST = [0xf3, 0x00]
 SLEEP = 0.01
 
 rom_type = {
@@ -15,6 +20,11 @@ rom_type = {
     '24XX': 0x02,
     '25XX': 0x03,
     '93XX': 0x04
+}
+
+voltage = {
+    3: 0x00,
+    5: 0x01
 }
 
 
@@ -40,7 +50,7 @@ def usb_open(vid, pid):
 
 
 def version(fin, fout):
-    fout.write([0x17, 0x00])
+    fout.write(CMD_VERSION)
     time.sleep(SLEEP)
     # b'\x17\x1eEZP2010 V2.1\x00\x00\xc2\x85\x7f\x05\x12j\xc7\x12j1\xd2\x85"\xc2\xa5\x7f'
     resp = fin.read(102)
@@ -49,38 +59,63 @@ def version(fin, fout):
 
 
 def detect(fin, fout, rom):
-    fout.write([0x15, 0x00]+[rom_type[rom]])
+    fout.write(CMD_DETECT+[rom_type[rom]])
     #  Detect chip error! = b'\x15\x01\x02'
     fin.read(5)
 
 
 def selftest(fin, fout):
-    fout.write([0xf3, 0x00])
+    fout.write(CMD_SELF_TEST)
     time.sleep(SLEEP)
     fin.read(2)
     print(fin.read(1000).tobytes())
 
 
 def serial(fin, fout):
-    fout.write([0x18, 0x00])
+    fout.write(CMD_SERIAL)
     time.sleep(SLEEP)
     resp = fin.read(20).tobytes()
     print(resp[2:])
 
 
-def write():
+def write(fin, fout, rom, data: bytes):
+    # b'1b240000' b'010000000001ef1300000000' type: 0 size: 1048576    name: WINBOND/W25X80A
+    # b'17240000' b'010000000001ef1300000000' type: 0 size: 1048576    name: WINBOND/W25X80AL
+    # b'17210000' b'010000000001ef1300000000' type: 0 size: 1048576    name: WINBOND/W25X80L
+    # r 11 0a 01 00 00 00 00 00 10 00 00 03 00 00 00 A
+    # r 11 0a 01 00 00 00 00 00 10 00 00 03 00 00 00 AL
+    # r 11 0a 01 00 00 00 00 00 10 00 00 03 00 00 00 L
+    # w 12 0c 01 00 00 00 00 00 10 00 00 01 00 03 00 00 00 A
+    # w 12 0c 01 00 00 00 00 00 10 00 00 01 00 03 00 00 00 AL
+    # w 12 0c 01 00 00 00 00 00 10 00 00 01 00 03 00 00 00 L
+
     # write: 12 0c 02 00 00 00 00 00 00 00 10 00 01 14 00 01 00
     # read: 12 01 01
+    # 12 0c 02 00 00 00 00 00 00 00 10 00 01 14 00 00 00 <-  16b 24C00 3V
+    # 12 0c 02 00 00 00 00 00 02 00 00 00 80 24 00 00 00 <- 128k 24C1024 3V
+    # 12 0c 02 00 00 00 00 00 02 00 00 00 80 24 00 01 00 <- 128k 24C1024 5V
+    # 12 0c 01 00 00 00 00 00 10 00 00 01 00 03 00 00 00 <-   1M W25X80L
+    # 12 0c 01 00 00 00 00 00 40 00 00 01 00 03 00 00 00 <-   4M AT25DF321
+    # 12 0c 01 00 00 00 00 01 00 00 00 01 00 03 00 00 00 <-  16M W25Q128BV
+    TODO = [0x24, 0x00]
+    TODO2 = [0x00, 0x01]
+    cmd = CMD_WRITE +\
+        [rom_type[rom]] +\
+        [0x00, 0x00, 0x00, 0x00] + \
+        list(struct.pack('>i', len(data))) +\
+        TODO2 +\
+        TODO +\
+        [voltage[3]] +\
+        [0x00]
+    fout.write(cmd)
+    time.sleep(SLEEP)
+
     pass
 
 
 def read(fin, fout, rom, size):
-
-    voltage = {
-        3: 0x00,
-        5: 0x01
-    }
     # 24XX
+    #  0  1  2  3  4  5  6  7  8  9  a  b  c  d  e
     # 11 0a 02 00 00 00 00 00 00 00 10 14 00 01 00 <-  16b MIC24LC00
     # 11 0a 02 00 00 00 00 00 00 01 00 14 00 01 00 <- 256b AT24C02
     # 11 0a 02 00 00 00 00 00 00 04 00 14 01 00 00 <-   1k 24C08 3V
@@ -106,6 +141,9 @@ def read(fin, fout, rom, size):
     # 11 0a 04 00 00 00 00 00 00 08 00 a8 01 01 00 <- 1Kx16b 93C86
     # SPI
     # 11 0a 01 00 00 00 00 00 01 00 00 03 01 00 00 <-  64k 25X512
+    # 11 0a 01 00 00 00 00 00 10 00 00 03 00 00 00 <-   1M W25X80L
+    # 11 0a 01 00 00 00 00 00 40 00 00 03 00 00 00 <-   4M AT25DF321
+    # 11 0a 01 00 00 00 00 01 00 00 00 03 00 00 00 <-  16M W25Q128BV
 
     # resp: 11 01 00: OK
     # resp: 11 01 02: Read chip error!
@@ -139,8 +177,8 @@ def read(fin, fout, rom, size):
 
 if __name__ == '__main__':
     (fout, fin) = usb_open(VID, PID)
-    #version(fin, fout)
-    #serial(fin, fout)
-    #selftest(fin, fout)
+    # version(fin, fout)
+    # serial(fin, fout)
+    # selftest(fin, fout)
     read(fin, fout, '24XX', 64*1024)
-    #read(fin, fout, '24XX', 16)
+    # read(fin, fout, '24XX', 16)
