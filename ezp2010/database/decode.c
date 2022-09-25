@@ -14,8 +14,8 @@ int main(void)
     {
         for (int i = 0; i < bytes; i++)
         {
-            k = (k + (((k << 3) - k) * 0x190 + k) * 6);
-            buffer[i] = buffer[i] - (((k >> 0x10) + k)) - 0x5a;
+            k = k + (((k << 3) - k) * 0x190 + k) * 6;
+            buffer[i] = buffer[i] - ((k >> 0x10) + k) - 0x5a;
         }
         fwrite(buffer, 1, bytes, fout);
     }
