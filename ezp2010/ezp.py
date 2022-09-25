@@ -54,12 +54,28 @@ def mystisk(type, size, should_mystisk, eet, ee93_bits):
         return [16 * eet | 8, 3 if ee93_bits == 8 else 1]
 
 
+def mystisk_from_entry(db_entry):
+    return mystisk(db_entry['type'],
+                   db_entry['size'],
+                   db_entry['should_mystisk'],
+                   db_entry['eet'],
+                   db_entry['ee93_bits'])
+
+
 def parse_entry(entry: bytes):
-    (type, prod, vend, unk1, voltage, size, unk2, should_mystisk, eet, ee93_bits, b, c) = struct.unpack(
-        'I 40s 20s c b 2x I 7s B B B B B 24x', entry)
+    (type, prod, vend, unk1, voltage, size, unk_write_1, unk_write_2, unk4, should_mystisk, eet, ee93_bits) = struct.unpack(
+        'I 40s 20s c b 2x I I h B B B B 26x', entry)
     # volt: 0x55 -> 85 -> 65
     # size: 0x58 -> 88 -> 68
     # should_mystisk: 0x63 -> 99 -> 79
+    # todo: page size
+    # AT24C01 -> 8B
+    # AT24C16 -> 16B
+    # AT24C32 -> 32B
+    # AT24C512 -> 128B
+    # AT24C1024B -> 256B
+    # W25P20 -> 4KB
+
     return {
         'type': type,
         'prod': prod.decode('ascii').replace('\0', ''),
@@ -67,12 +83,12 @@ def parse_entry(entry: bytes):
         'unk1': unk1,
         'voltage': voltage,
         'size': size,
-        'unk2': unk2,
+        'unk_write_1': unk_write_1,
+        'unk_write_2': unk_write_2,
+        'unk4': unk4,
         'should_mystisk': should_mystisk,
         'eet': eet,
-        'ee93_bits': ee93_bits,
-        'b': b,
-        'c': c
+        'ee93_bits': ee93_bits
     }
 
 
@@ -83,27 +99,17 @@ def db_dump():
     for w in db_read_entries('database/DateBase.bin'):
 
         entry = parse_entry(w)
-        chip_voltage_is5v = False if type == 0 else voltage > 0x28
+        chip_voltage_is5v = False if entry['type'] == 0 else entry['voltage'] > 0x28
 
         cats = ["spi ", "ee24", "ee25", 'ee93']
         chip_category = cats[entry['type']]
-        mystisk_lo = mystisk(
-            entry['type'], entry['size'], entry['should_mystisk'], entry['eet'])
+        mystisk_lo = mystisk_from_entry(entry)
 
-        # muligens fucka etter byte 64
-        prod = prod.decode('ascii').replace('\0', '')
-        vend = vend.decode('ascii').replace('\0', '')
-        print(
-            binascii.b2a_hex(entry['unk1']),
-            binascii.b2a_hex(entry['unk2']),
-            binascii.b2a_hex(entry['unk3']),
-            f'type: {type}',
-            f'cat: {chip_category}',
-            f'mys_lo: {hex(mystisk_lo)}',
-            f'is5v: {chip_voltage_is5v}',
-            f"size: {entry['size']}\t",
-            f"name: {entry['vend']}/{entry['prod']}",
-        )
+        # region that isnt padding nor name/vendor/type
+        flags = w[64:-26]
+        # print(str(binascii.hexlify(flags)))
+        # print(entry)
+        print(str(binascii.hexlify(flags)) + " " + entry['prod'])
 
 
 def usb_open(vid, pid):
@@ -156,39 +162,28 @@ def serial(fin, fout):
     print(resp[2:])
 
 
-def write(fin, fout, rom, data: bytes):
-    # b'1b240000' b'010000000001ef1300000000' type: 0 size: 1048576    name: WINBOND/W25X80A
-    # b'17240000' b'010000000001ef1300000000' type: 0 size: 1048576    name: WINBOND/W25X80AL
-    # b'17210000' b'010000000001ef1300000000' type: 0 size: 1048576    name: WINBOND/W25X80L
-    # r 11 0a 01 00 00 00 00 00 10 00 00 03 00 00 00 A
-    # r 11 0a 01 00 00 00 00 00 10 00 00 03 00 00 00 AL
-    # r 11 0a 01 00 00 00 00 00 10 00 00 03 00 00 00 L
-    # w 12 0c 01 00 00 00 00 00 10 00 00 01 00 03 00 00 00 A
-    # w 12 0c 01 00 00 00 00 00 10 00 00 01 00 03 00 00 00 AL
-    # w 12 0c 01 00 00 00 00 00 10 00 00 01 00 03 00 00 00 L
-
-    # write: 12 0c 02 00 00 00 00 00 00 00 10 00 01 14 00 01 00
-    # read: 12 01 01
-    # 12 0c 02 00 00 00 00 00 00 00 10 00 01 14 00 00 00 <-  16b 24C00 3V
-    # 12 0c 02 00 00 00 00 00 02 00 00 00 80 24 00 00 00 <- 128k 24C1024 3V
-    # 12 0c 02 00 00 00 00 00 02 00 00 00 80 24 00 01 00 <- 128k 24C1024 5V
-    # 12 0c 01 00 00 00 00 00 10 00 00 01 00 03 00 00 00 <-   1M W25X80L
-    # 12 0c 01 00 00 00 00 00 40 00 00 01 00 03 00 00 00 <-   4M AT25DF321
-    # 12 0c 01 00 00 00 00 01 00 00 00 01 00 03 00 00 00 <-  16M W25Q128BV
-    TODO = [0x24, 0x00]
-    TODO2 = [0x00, 0x01]
-    cmd = CMD_WRITE +\
-        [rom_type[rom]] +\
+def create_write_cmd(db_entry):
+    m = mystisk_from_entry(db_entry)
+    b = 0x01 if db_entry['unk_write_1'] == 0 else db_entry['unk_write_2']
+    # TODO2 = [0x00, b]
+    # last seen: 0040fd94
+    x = CMD_WRITE +\
+        [db_entry['type']+1] +\
         [0x00, 0x00, 0x00, 0x00] + \
-        list(struct.pack('>i', len(data))) +\
-        TODO2 +\
-        TODO +\
-        [voltage[3]] +\
+        list(struct.pack('>i', db_entry['size'])) +\
+        list(struct.pack('>h', b)) +\
+        m +\
+        [0x01 if db_get_is5v(db_entry) else 0x00] +\
         [0x00]
-    fout.write(cmd)
-    time.sleep(SLEEP)
+    return bytes(x)
 
-    pass
+
+def write(fin, fout, db_entry, data: bytes):
+    fout.write(create_write_cmd(db_entry))
+    time.sleep(SLEEP)
+    resp = fin.read(3).tobytes()
+    if resp == bytes([0x12, 0x01, 0x01]):
+        pass
 
 
 def db_get_is5v(db_entry):
@@ -196,11 +191,7 @@ def db_get_is5v(db_entry):
 
 
 def create_read_cmd(db_entry):
-    m = mystisk(db_entry['type'],
-                db_entry['size'],
-                db_entry['should_mystisk'],
-                db_entry['eet'],
-                db_entry['ee93_bits'])
+    m = mystisk_from_entry(db_entry)
     # In EZP2010.exe byte at 0xc can get "stuck" to 0x01 (normally 0x00)
     # when selecting a 93eeprom and then another eeprom category.
     x = CMD_READ +\
@@ -239,9 +230,9 @@ def read(fin, fout, db_entry):
 
 if __name__ == '__main__':
     db_dump()
-    #(fout, fin) = usb_open(VID, PID)
+    # (fout, fin) = usb_open(VID, PID)
     # version(fin, fout)
     # serial(fin, fout)
     # selftest(fin, fout)
-    #read(fin, fout, '24XX', 64*1024)
+    # read(fin, fout, '24XX', 64*1024)
     # read(fin, fout, '24XX', 16)

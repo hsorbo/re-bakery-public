@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import ezp
+import binascii
 
 
 class Tests(unittest.TestCase):
@@ -43,6 +44,36 @@ class Tests(unittest.TestCase):
             self.assertEqual(len(entries), 1)
             entry = entries[0]
             got = ezp.create_read_cmd(entry)
+            expected = bytearray.fromhex(expected_str)
+            self.assertEqual(got, expected)
+
+    def test_create_write_cmd(self):
+        known = [
+            #  0 1 2 3 4 5 6 7 8 9 a b c d e
+            # 24XX
+            ('120c020000000000000010000114000000', '24C00 3V'),
+            ('120c020000000000020000008024000000', '24C1024 3V'),
+            ('120c020000000000020000008024000100', '24C1024 5V'),
+            # 93XX
+            ('120c030000000000000080000401000100', 'AT25010'),
+            ('120c030000000000000800001011000100', 'MIC25LC160'),
+            ('120c030000000000000400000811000100', 'ST25W08'),
+            # 25XX
+            ('120c040000000000000080000168010100', 'AK93C45AV'),
+            ('120c0400000000000008000001b8030100', 'AT93C86(8bit)-SOP8'),
+            ('120c040000000000000020000168010100', 'FM93C06AM8(16bit)'),
+            ('120c0400000000000008000001a8010100', 'NSC93C86'),
+            # SPI
+            ('120c010000000000100000010003000000', 'W25X80L'),
+            ('120c010000000000400000010003000000', 'AT25DF321'),
+            ('120c010000000001000000010003000000', 'W25Q128BV')
+        ]
+
+        for (expected_str, prod) in known:
+            entries = list(filter(lambda x: x['prod'] == prod, ezp.entries))
+            self.assertEqual(len(entries), 1)
+            entry = entries[0]
+            got = ezp.create_write_cmd(entry)
             expected = bytearray.fromhex(expected_str)
             self.assertEqual(got, expected)
 
