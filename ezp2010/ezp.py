@@ -48,11 +48,11 @@ def db_read_entries(filename: str):
     f.close()
 
 
-def mystisk(type, size, should_mystisk, ee93_unk, ee93_bits):
+def flags(type, size, ee24_unk, ee93_unk, ee93_bits):
     if type == 0:
         return 0x0300
     elif type == 1:
-        if (should_mystisk != 0xfe):
+        if (ee24_unk != 0xfe):
             return 0x2400 if size > 0x800 else 0x1400
         else:
             return 0x0400
@@ -64,20 +64,20 @@ def mystisk(type, size, should_mystisk, ee93_unk, ee93_bits):
         return (hi << 8) | lo
 
 
-def mystisk_from_entry(db_entry):
-    return mystisk(db_entry['type'],
+def flags_from_entry(db_entry):
+    return flags(db_entry['type'],
                    db_entry['size'],
-                   db_entry['should_mystisk'],
+                   db_entry['ee24_unk'],
                    db_entry['ee93_unk'],
                    db_entry['ee93_bits'])
 
 
 def parse_entry(entry: bytes):
-    (type, prod, vend, unk1, voltage, size, unk_write_1, unk_write_2, unk2, should_mystisk, ee93_unk, ee93_bits) = struct.unpack(
+    (type, prod, vend, unk1, voltage, size, unk_write_1, unk_write_2, unk2, ee24_unk, ee93_unk, ee93_bits) = struct.unpack(
         'I 40s 20s c b 2x I I h B B B B 26x', entry)
     # volt: 0x55 -> 85 -> 65
     # size: 0x58 -> 88 -> 68
-    # should_mystisk: 0x63 -> 99 -> 79
+    # ee24_unk: 0x63 -> 99 -> 79
 
     return {
         'type': type,
@@ -90,7 +90,7 @@ def parse_entry(entry: bytes):
         'unk_write_1': unk_write_1,
         'unk_write_2': unk_write_2,
         'unk2': unk2,
-        'should_mystisk': should_mystisk,
+        'ee24_unk': ee24_unk,
         'ee93_x': size / 2,
         'ee93_unk': ee93_unk,
         'ee93_bits': ee93_bits
@@ -106,7 +106,7 @@ def db_dump():
         entry = parse_entry(w)
         cats = ["spi ", "ee24", "ee25", 'ee93']
         chip_category = cats[entry['type']]
-        mystisk_lo = mystisk_from_entry(entry)
+        ee24_unk = flags_from_entry(entry)
 
         # region that isnt padding nor name/vendor/type
         flags = w[64:-26]
@@ -174,7 +174,7 @@ def create_write_cmd(db_entry):
         db_entry['type']+1,
         db_entry['size'],
         0x01 if db_entry['unk_write_1'] == 0 else db_entry['unk_write_2'],
-        mystisk_from_entry(db_entry),
+        flags_from_entry(db_entry),
         0x01 if db_get_is5v(db_entry) else 0x00)
 
 
@@ -186,7 +186,7 @@ def create_read_cmd(db_entry):
         Commands.READ.value,
         db_entry['type']+1,
         db_entry['size'],
-        mystisk_from_entry(db_entry),
+        flags_from_entry(db_entry),
         0x01 if db_get_is5v(db_entry) else 0x00)
 
 
