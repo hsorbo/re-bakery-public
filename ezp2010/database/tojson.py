@@ -16,23 +16,23 @@ def db_read_entries(filename: str):
 
 
 def parse_entry(entry: bytes):
-    (type, prod, vend, unk1, voltage, size, unk_write_1, unk_write_2, unk2, mystisk, ee93_flags, ee93_bits) = struct.unpack(
+    (type, prod, vend, unk1, voltage, size, unk_write_1, unk_write_2, unk2, ee24_unk, ee93_flags, ee93_bits) = struct.unpack(
         'I 40s 20s b b 2x I I h B B B B 26x', entry)
     # volt: 0x55 -> 85 -> 65
     # size: 0x58 -> 88 -> 68
-    # should_mystisk: 0x63 -> 99 -> 79
+    # ee24_unk: 0x63 -> 99 -> 79
     types = ['SPI', '24XX', '25XX', '93XX']
     return {
         'type': types[type],
         'prod': prod.decode('ascii').replace('\0', ''),
         'vend': vend.decode('ascii').replace('\0', ''),
-        'unk1': unk1,
+        # 'unk1': unk1, #unused
         'voltage': voltage,
         'size': size,
         'unk_write_1': unk_write_1,
         'unk_write_2': unk_write_2,
-        'unk2': unk2,
-        'mystisk': mystisk,
+        # 'unk2': unk2, #unused
+        # 'ee24_unk': ee24_unk, #unused 
         'ee93_flags': ee93_flags,
         'ee93_bits': ee93_bits
     }

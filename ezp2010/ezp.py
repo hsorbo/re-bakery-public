@@ -5,15 +5,22 @@ import usb.util
 import struct
 import time
 import binascii
+from enum import Enum
+
 
 VID = 0x10c4
 PID = 0xf5a0
-CMD_READ = bytes([0x11, 0x0a])
-CMD_WRITE = bytes([0x12, 0x0c])
-CMD_DETECT = [0x15, 0x00]
-CMD_VERSION = [0x17, 0x00]
-CMD_SERIAL = [0x18, 0x00]
-CMD_SELF_TEST = [0xf3, 0x00]
+
+
+class Commands(Enum):
+    READ = 0x110a
+    WRITE = 0x120c
+    DETECT = 0x1500
+    VERSION = 0x1700
+    SERIAL = 0x1800
+    SELF_TEST = 0xf300
+
+
 SLEEP = 0.01
 
 rom_type = {
@@ -43,16 +50,18 @@ def db_read_entries(filename: str):
 
 def mystisk(type, size, should_mystisk, ee93_unk, ee93_bits):
     if type == 0:
-        return [0x03, 0x00]
+        return 0x0300
     elif type == 1:
         if (should_mystisk != 0xfe):
-            return [36 if size > 0x800 else 20, 0x00]
+            return 0x2400 if size > 0x800 else 0x1400
         else:
-            return [0x04, 0x00]
+            return 0x0400
     elif type == 2:
-        return [17 if size > 0x200 else 1, 0x00]
+        return 0x1100 if size > 0x200 else 0x0100
     elif type == 3:
-        return [16 * ee93_unk | 8, 3 if ee93_bits == 8 else 1]
+        hi = 0x10 * ee93_unk | 0x08
+        lo = 0x03 if ee93_bits == 0x08 else 0x01
+        return (hi << 8) | lo
 
 
 def mystisk_from_entry(db_entry):
@@ -82,6 +91,7 @@ def parse_entry(entry: bytes):
         'unk_write_2': unk_write_2,
         'unk2': unk2,
         'should_mystisk': should_mystisk,
+        'ee93_x': size / 2,
         'ee93_unk': ee93_unk,
         'ee93_bits': ee93_bits
     }
@@ -101,7 +111,7 @@ def db_dump():
         # region that isnt padding nor name/vendor/type
         flags = w[64:-26]
         print(entry)
-        # print(str(binascii.hexlify(flags)))
+        print(str(binascii.hexlify(w)))
         #print(str(entry['unk2']) + " " + entry['prod'])
         #print(str(binascii.hexlify(flags, " ", 1)) + " " + entry['prod'])
 
@@ -128,7 +138,8 @@ def usb_open(vid, pid):
 
 
 def version(fin, fout):
-    fout.write(CMD_VERSION)
+
+    fout.write(struct.pack('>H', Commands.VERSION.value))
     time.sleep(SLEEP)
     # b'\x17\x1eEZP2010 V2.1\x00\x00\xc2\x85\x7f\x05\x12j\xc7\x12j1\xd2\x85"\xc2\xa5\x7f'
     resp = fin.read(102)
@@ -137,20 +148,20 @@ def version(fin, fout):
 
 
 def detect(fin, fout, rom):
-    fout.write(CMD_DETECT+[rom_type[rom]])
+    fout.write(struct.pack('>H B ', Commands.DETECT.value, rom_type[rom]))
     #  Detect chip error! = b'\x15\x01\x02'
-    fin.read(5)
+    return fin.read(5)
 
 
 def selftest(fin, fout):
-    fout.write(CMD_SELF_TEST)
+    fout.write(Commands.SELF_TEST.value)
     time.sleep(SLEEP)
     fin.read(2)
     print(fin.read(1000).tobytes())
 
 
 def serial(fin, fout):
-    fout.write(CMD_SERIAL)
+    fout.write(Commands.SERIAL.value)
     time.sleep(SLEEP)
     resp = fin.read(20).tobytes()
     print(resp[2:])
@@ -158,12 +169,12 @@ def serial(fin, fout):
 
 def create_write_cmd(db_entry):
     return struct.pack(
-        '> 2s B 4x i h 2s B x',
-        CMD_WRITE,
+        '> H B 4x i H H B x',
+        Commands.WRITE.value,
         db_entry['type']+1,
         db_entry['size'],
         0x01 if db_entry['unk_write_1'] == 0 else db_entry['unk_write_2'],
-        bytes(mystisk_from_entry(db_entry)),
+        mystisk_from_entry(db_entry),
         0x01 if db_get_is5v(db_entry) else 0x00)
 
 
@@ -171,11 +182,11 @@ def create_read_cmd(db_entry):
     # In EZP2010.exe byte at 0xc can get "stuck" to 0x01 (normally 0x00)
     # when selecting a 93eeprom and then another eeprom category.
     return struct.pack(
-        '> 2s B 4x i 2s B x',
-        CMD_READ,
+        '> H B 4x i H B x',
+        Commands.READ.value,
         db_entry['type']+1,
         db_entry['size'],
-        bytes(mystisk_from_entry(db_entry)),
+        mystisk_from_entry(db_entry),
         0x01 if db_get_is5v(db_entry) else 0x00)
 
 
@@ -217,8 +228,9 @@ def read(fin, fout, db_entry):
 
 if __name__ == '__main__':
     db_dump()
-    # (fout, fin) = usb_open(VID, PID)
-    # version(fin, fout)
+    #(fout, fin) = usb_open(VID, PID)
+    #print(detect(fin,fout,'SPI'))
+    #version(fin, fout)
     # serial(fin, fout)
     # selftest(fin, fout)
     # read(fin, fout, '24XX', 64*1024)

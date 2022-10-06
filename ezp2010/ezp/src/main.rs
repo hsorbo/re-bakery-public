@@ -29,8 +29,8 @@
 // ) -> Result<(EndpointDescriptor, EndpointDescriptor), Box<dyn std::error::Error>> {
 // }
 
-use std::ffi::CStr;
 use ezp::ezp_commands;
+use ezp::db;
 
 fn open_usb() -> Result<bool, Box<dyn std::error::Error>> {
     let mut handle = rusb::open_device_with_vid_pid(0x10c4, 0xf5a0).ok_or("Not Found")?;
@@ -68,24 +68,49 @@ fn open_usb() -> Result<bool, Box<dyn std::error::Error>> {
     println!("fin {} fout {}", fin.address(), fout.address());
 
     let mut data: [u8; 4096] = [0x00; 4096];
-    {
-        handle.write_bulk(fout.address(), &ezp_commands::create_serial_cmd(), timeout)?;
-        let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
-        println!("{:#?}", ezp_commands::process_serial(&data[..read].to_vec())?);
-    }
+    // {
+    //     handle.write_bulk(fout.address(), &ezp_commands::create_serial_cmd(), timeout)?;
+    //     let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
+    //     println!("{:#?}", ezp_commands::process_serial(&data[..read].to_vec())?);
+    // }
 
-    {
-        handle.write_bulk(fout.address(), &ezp_commands::create_version_cmd(), timeout)?;
-        let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
-        println!("{:#?}", ezp_commands::process_version(&data[..read].to_vec())?);
-    }
+    // {
+    //     handle.write_bulk(fout.address(), &ezp_commands::create_version_cmd(), timeout)?;
+    //     let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
+    //     println!("{:#?}", ezp_commands::process_version(&data[..read].to_vec())?);
+    // }
 
+    // {
+    //     handle.write_bulk(fout.address(), &ezp_commands::create_self_test_cmd(), timeout)?;
+    //     handle.read_bulk(fin.address(), &mut data, timeout)?;
+    //     std::thread::sleep(std::time::Duration::from_millis(200));
+    //     let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
+    //     println!("{:#?}",  String::from_utf8(data[..read].to_vec())?);
+    // }
+    // {
+    //     let cmd = &ezp_commands::create_detect_cmd(&ezp::ezp_common::ChipType::EE25);
+    //     handle.write_bulk(fout.address(), cmd, timeout)?;
+    //     std::thread::sleep(std::time::Duration::from_millis(200));
+    //     let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
+    //     println!("{}",hex::encode(&data[..read]));
+    // }
     {
-        handle.write_bulk(fout.address(), &ezp_commands::create_self_test_cmd(), timeout)?;
-        handle.read_bulk(fin.address(), &mut data, timeout)?;
-        std::thread::sleep_ms(200);
+        let all = db::getall().unwrap();
+        let chip = all.iter().find(|x| x.product_name == "EN25F80").unwrap();
+        let cmd = &ezp_commands::create_read_cmd(&chip.chip_type, chip.size, chip.flags(), chip.is5v());
+        handle.write_bulk(fout.address(), cmd, timeout)?;
+        std::thread::sleep(std::time::Duration::from_millis(200));
         let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
-        println!("{:#?}", &data[..read]);
+        println!("{}",hex::encode(&data[..read]));
+        //asert 110100.
+        loop {
+            let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
+            println!("{}", read);
+            if read < 4096{
+                break;
+            }
+        }
+
     }
 
     return Ok(true);
