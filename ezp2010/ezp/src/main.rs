@@ -1,117 +1,131 @@
 //use clap::{App, Arg};
-
-//const USB_ID: (u16, u16) = (0x10c4, 0xf5a0);
-// //type MathResult = Result<Vec<rusb::Device<rusb::GlobalContext>>, std::io::Error>;
-// fn get_device() -> Result<Device<GlobalContext>, rusb::Error> {
-//     let devices = rusb::devices()?
-//         .iter()
-//         .filter(|x| {
-//             let device_desc = x.device_descriptor().unwrap();
-//             return USB_ID == (device_desc.vendor_id(), device_desc.product_id());
-//         })
-//         .collect::<Vec<_>>();
-//     //let a = rusb::devices().unwrap();
-//     //let devices = a.iter().nth(0);
-//     //return devices.map_or(Err(rusb::Error::NotFound), Ok);
-//     return match &devices[..] {
-//         [x] => Ok(x.clone()),
-//         _ => Err(rusb::Error::NotFound),
-//     };
-
-//}
-//https://gill.net.in/posts/reverse-engineering-a-usb-device-with-rust/
 //ctrl+option to show rust inlays in vscode
 //https://docs.rs/byteorder/1.0.0/byteorder/trait.ByteOrder.html
 //https://gill.net.in/posts/reverse-engineering-a-usb-device-with-rust/
 
-// fn get_descr(
-//     device: Device<GlobalContext>,
-// ) -> Result<(EndpointDescriptor, EndpointDescriptor), Box<dyn std::error::Error>> {
-// }
+use std::time::Duration;
 
-use ezp::ezp_commands;
 use ezp::db;
+use ezp::db::ChipDbEntry;
+use ezp::ezp_commands;
+use ezp::ezp_common::ChipType;
+use itertools::Itertools;
+use rusb::DeviceHandle;
+use rusb::EndpointDescriptor;
+use rusb::GlobalContext;
+use rusb::InterfaceDescriptor;
+
+pub trait Programmer {
+    fn read(&self, buf: &mut [u8]) -> Result<usize, rusb::Error>;
+    fn write(&self, buf: &[u8]) -> Result<usize, rusb::Error>;
+}
+
+struct UsbProgrammer<'a> {
+    handle: DeviceHandle<GlobalContext>,
+    fin: EndpointDescriptor<'a>,
+    fout: EndpointDescriptor<'a>,
+}
+impl UsbProgrammer<'_> {
+    fn create_programmer<'a>(
+        handle: DeviceHandle<GlobalContext>,
+        ifdesc: &'a InterfaceDescriptor,
+    ) -> UsbProgrammer<'a> {
+        return UsbProgrammer {
+            handle: handle,
+            fout: ifdesc
+                .endpoint_descriptors()
+                .find(|x| x.direction() == rusb::Direction::Out)
+                .unwrap(),
+            fin: ifdesc
+                .endpoint_descriptors()
+                .find(|x| x.direction() == rusb::Direction::In)
+                .unwrap(),
+        };
+    }
+}
+impl Programmer for UsbProgrammer<'_> {
+    fn write(&self, buf: &[u8]) -> Result<usize, rusb::Error> {
+        let timeout: Duration = core::time::Duration::from_millis(10000);
+        return self.handle.write_bulk(self.fout.address(), buf, timeout);
+    }
+    fn read(&self, buf: &mut [u8]) -> Result<usize, rusb::Error> {
+        let timeout: Duration = core::time::Duration::from_millis(10000);
+        return self.handle.read_bulk(self.fin.address(), buf, timeout);
+    }
+}
+
+fn get_serial(p: &UsbProgrammer) -> Result<String, Box<dyn std::error::Error>> {
+    let mut data: [u8; 512] = [0x00; 512];
+    let _ = p.write(&ezp_commands::create_serial_cmd());
+    let read = p.read(&mut data)?;
+    return Ok(ezp_commands::process_serial(&data[..read].to_vec())?);
+}
+
+fn get_version(p: &UsbProgrammer) -> Result<String, Box<dyn std::error::Error>> {
+    let mut data: [u8; 512] = [0x00; 512];
+    let _ = p.write(&ezp_commands::create_version_cmd());
+    let read = p.read(&mut data)?;
+    return Ok(ezp_commands::process_version(&data[..read].to_vec())?);
+}
+
+fn self_test(p: &UsbProgrammer) -> Result<String, Box<dyn std::error::Error>> {
+    let mut data: [u8; 512] = [0x00; 512];
+    let _ = p.write(&ezp_commands::create_self_test_cmd());
+    let _ = p.read(&mut data)?;
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let read = p.read(&mut data)?;
+    return Ok(String::from_utf8(data[..read].to_vec())?);
+}
+
+fn detect(p: &UsbProgrammer, chip_type: &ChipType) -> Result<String, Box<dyn std::error::Error>> {
+    let mut data: [u8; 5] = [0x00; 5];
+    let cmd = &ezp_commands::create_detect_cmd(chip_type);
+    let _ = p.write(cmd);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let read = p.read(&mut data)?;
+    return Ok(hex::encode(&data[..read]));
+}
+
+fn read(p: &UsbProgrammer, chip: &ChipDbEntry) -> Result<(), Box<dyn std::error::Error>> {
+    let mut data: [u8; 4096] = [0x00; 4096];
+    let cmd = &ezp_commands::create_read_cmd(&chip.chip_type, chip.size, chip.flags(), chip.is5v());
+    let _ = p.write(cmd);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let read = p.read(&mut data)?;
+    println!("{}", hex::encode(&data[..read]));
+    //asert 110100
+    loop {
+        let read = p.read(&mut data)?;
+        println!("{}", read);
+        if read < 4096 {
+            break;
+        }
+    }
+    return Ok(());
+}
 
 fn open_usb() -> Result<bool, Box<dyn std::error::Error>> {
     let mut handle = rusb::open_device_with_vid_pid(0x10c4, 0xf5a0).ok_or("Not Found")?;
-    //handle.reset()?;
     let device = handle.device();
-    let descr = device.device_descriptor()?;
-    //println!("{:#?}", descr);
-    assert_eq!(1, descr.num_configurations());
     let config = device.config_descriptor(0)?;
-    //println!("{:#?}", config);
-    assert_eq!(1, config.num_interfaces());
-    let iface = config.interfaces().nth(0).ok_or("Interface not found")?;
-    assert_eq!(1, iface.descriptors().count());
-    let ifdesc = iface
-        .descriptors()
-        .nth(0)
-        .ok_or("Interface descriptor not found")?;
-    //println!("{:#?}", ifdesc);
-    let fout = ifdesc
-        .endpoint_descriptors()
-        .find(|x| x.direction() == rusb::Direction::Out)
-        .ok_or("meh")?;
-
-    let fin = ifdesc
-        .endpoint_descriptors()
-        .find(|x| x.direction() == rusb::Direction::In)
-        .ok_or("meh")?;
+    let iface = config
+        .interfaces()
+        .exactly_one()
+        .map_err(|_| "Interface not found")?;
+    let ifdesc = iface.descriptors().exactly_one().map_err(|_| "not found")?;
 
     handle.set_auto_detach_kernel_driver(true)?;
     handle.set_active_configuration(config.number())?;
     handle.claim_interface(iface.number())?;
     //handle.reset()?;
 
-    let timeout = core::time::Duration::from_millis(10000);
-    println!("fin {} fout {}", fin.address(), fout.address());
-
-    let mut data: [u8; 4096] = [0x00; 4096];
-    // {
-    //     handle.write_bulk(fout.address(), &ezp_commands::create_serial_cmd(), timeout)?;
-    //     let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
-    //     println!("{:#?}", ezp_commands::process_serial(&data[..read].to_vec())?);
-    // }
-
-    // {
-    //     handle.write_bulk(fout.address(), &ezp_commands::create_version_cmd(), timeout)?;
-    //     let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
-    //     println!("{:#?}", ezp_commands::process_version(&data[..read].to_vec())?);
-    // }
-
-    // {
-    //     handle.write_bulk(fout.address(), &ezp_commands::create_self_test_cmd(), timeout)?;
-    //     handle.read_bulk(fin.address(), &mut data, timeout)?;
-    //     std::thread::sleep(std::time::Duration::from_millis(200));
-    //     let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
-    //     println!("{:#?}",  String::from_utf8(data[..read].to_vec())?);
-    // }
-    // {
-    //     let cmd = &ezp_commands::create_detect_cmd(&ezp::ezp_common::ChipType::EE25);
-    //     handle.write_bulk(fout.address(), cmd, timeout)?;
-    //     std::thread::sleep(std::time::Duration::from_millis(200));
-    //     let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
-    //     println!("{}",hex::encode(&data[..read]));
-    // }
-    {
-        let all = db::getall().unwrap();
-        let chip = all.iter().find(|x| x.product_name == "EN25F80").unwrap();
-        let cmd = &ezp_commands::create_read_cmd(&chip.chip_type, chip.size, chip.flags(), chip.is5v());
-        handle.write_bulk(fout.address(), cmd, timeout)?;
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
-        println!("{}",hex::encode(&data[..read]));
-        //asert 110100.
-        loop {
-            let read = handle.read_bulk(fin.address(), &mut data, timeout)?;
-            println!("{}", read);
-            if read < 4096{
-                break;
-            }
-        }
-
-    }
+    let p = UsbProgrammer::create_programmer(handle, &ifdesc);
+    //println!("Programmer: {}\nS/N: {}", get_version(&p)?, get_serial(&p)?);
+    println!("Programmer reported: {}", self_test(&p)?);
+    //println!("{}", detect(&p, &ChipType::EE24)?);
+    //let all = db::getall()?;
+    //let chip = all.iter().find(|x| x.product_name == "EN25F80").unwrap();
+    //let _ = read(&p, chip);
 
     return Ok(true);
 }
