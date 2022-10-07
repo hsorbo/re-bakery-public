@@ -6,35 +6,24 @@
 use clap::{App, SubCommand};
 use ezp::{programmer::UsbProgrammer, programming};
 use itertools::Itertools;
+use rusb::{ConfigDescriptor, Device, DeviceHandle, GlobalContext, Interface, InterfaceDescriptor};
 
-fn open_usb() -> Result<bool, Box<dyn std::error::Error>> {
-    let mut handle = rusb::open_device_with_vid_pid(0x10c4, 0xf5a0).ok_or("Not Found")?;
-    let device = handle.device();
-    let config = device.config_descriptor(0)?;
-    let iface = config
+
+
+pub fn only_interface(c: &ConfigDescriptor) -> Interface {
+    return c
         .interfaces()
         .exactly_one()
-        .map_err(|_| "Interface not found")?;
+        .map_err(|_| "Interface not found")
+        .unwrap();
+}
+
+
+fn open_usb() -> Result<bool, Box<dyn std::error::Error>> {
+    let usb = ezp::programmer::UsbProgrammerContext::open()?;
+    let iface = only_interface(&usb.config);
     let ifdesc = iface.descriptors().exactly_one().map_err(|_| "not found")?;
-
-    handle.set_auto_detach_kernel_driver(true)?;
-    handle.set_active_configuration(config.number())?;
-    handle.claim_interface(iface.number())?;
-    //handle.reset()?;
-
-    let p = UsbProgrammer::create_programmer(handle, &ifdesc);
-
-    println!(
-        "Programmer: {}\nS/N: {}\nStatus: {}",
-        programming::get_version(&p)?,
-        programming::get_serial(&p)?,
-        programming::self_test(&p)?
-    );
-    //println!("{}", detect(&p, &ChipType::EE24)?);
-    //let all = db::getall()?;
-    //let chip = all.iter().find(|x| x.product_name == "EN25F80").unwrap();
-    //let _ = read(&p, chip);
-
+    let p = UsbProgrammer::create_programmer(usb.handle, &ifdesc);
     return Ok(true);
 }
 

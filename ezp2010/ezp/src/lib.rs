@@ -238,12 +238,48 @@ pub mod db {
 }
 
 pub mod programmer {
-    use rusb::{DeviceHandle, EndpointDescriptor, GlobalContext, InterfaceDescriptor};
+    use itertools::Itertools;
+    use rusb::{DeviceHandle, EndpointDescriptor, GlobalContext, InterfaceDescriptor, Device, ConfigDescriptor, Interface};
     use std::time::Duration;
 
     pub trait Programmer {
         fn read(&self, buf: &mut [u8]) -> Result<usize, rusb::Error>;
         fn write(&self, buf: &[u8]) -> Result<usize, rusb::Error>;
+    }
+
+    pub struct UsbProgrammerContext {
+        pub handle: DeviceHandle<GlobalContext>,
+        device: Device<GlobalContext>,
+        pub config: ConfigDescriptor,
+    }
+    
+    fn only_interface(c: &ConfigDescriptor) -> Interface {
+        return c
+            .interfaces()
+            .exactly_one()
+            .map_err(|_| "Interface not found")
+            .unwrap();
+    }
+    
+    impl UsbProgrammerContext {
+        pub fn open() -> Result<UsbProgrammerContext, Box<dyn std::error::Error>> {
+            let mut handle =
+            rusb::open_device_with_vid_pid(0x10c4, 0xf5a0).ok_or("Programmer not found")?;
+            let device = handle.device();
+            let config = device.config_descriptor(0)?;
+    
+            handle.set_auto_detach_kernel_driver(true)?;
+            handle.set_active_configuration(config.number())?;
+    
+            let iface = only_interface(&config);
+            handle.claim_interface(iface.number())?;
+            let k = UsbProgrammerContext {
+                handle,
+                device,
+                config,
+            };
+            return Ok(k);
+        }
     }
 
     pub struct UsbProgrammer<'a> {
