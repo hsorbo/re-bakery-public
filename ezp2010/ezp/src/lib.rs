@@ -236,3 +236,110 @@ pub mod db {
         return Ok(entries);
     }
 }
+
+pub mod programmer {
+    use rusb::{DeviceHandle, EndpointDescriptor, GlobalContext, InterfaceDescriptor};
+    use std::time::Duration;
+
+    pub trait Programmer {
+        fn read(&self, buf: &mut [u8]) -> Result<usize, rusb::Error>;
+        fn write(&self, buf: &[u8]) -> Result<usize, rusb::Error>;
+    }
+
+    pub struct UsbProgrammer<'a> {
+        handle: DeviceHandle<GlobalContext>,
+        fin: EndpointDescriptor<'a>,
+        fout: EndpointDescriptor<'a>,
+    }
+    impl UsbProgrammer<'_> {
+        pub fn create_programmer<'a>(
+            handle: DeviceHandle<GlobalContext>,
+            ifdesc: &'a InterfaceDescriptor,
+        ) -> UsbProgrammer<'a> {
+            return UsbProgrammer {
+                handle: handle,
+                fout: ifdesc
+                    .endpoint_descriptors()
+                    .find(|x| x.direction() == rusb::Direction::Out)
+                    .unwrap(),
+                fin: ifdesc
+                    .endpoint_descriptors()
+                    .find(|x| x.direction() == rusb::Direction::In)
+                    .unwrap(),
+            };
+        }
+    }
+    const TIMEOUT: Duration = core::time::Duration::from_millis(10000);
+
+    impl Programmer for UsbProgrammer<'_> {
+        fn write(&self, buf: &[u8]) -> Result<usize, rusb::Error> {
+            return self.handle.write_bulk(self.fout.address(), buf, TIMEOUT);
+        }
+        fn read(&self, buf: &mut [u8]) -> Result<usize, rusb::Error> {
+            return self.handle.read_bulk(self.fin.address(), buf, TIMEOUT);
+        }
+    }
+}
+
+pub mod programming {
+    use crate::{
+        db::ChipDbEntry,
+        ezp_commands,
+        ezp_common::ChipType,
+        programmer::{Programmer, UsbProgrammer},
+    };
+
+    pub fn get_serial(p: &UsbProgrammer) -> Result<String, Box<dyn std::error::Error>> {
+        let mut data: [u8; 512] = [0x00; 512];
+        let _ = p.write(&ezp_commands::create_serial_cmd());
+        let read = p.read(&mut data)?;
+        return Ok(ezp_commands::process_serial(&data[..read].to_vec())?);
+    }
+
+    pub fn get_version(p: &UsbProgrammer) -> Result<String, Box<dyn std::error::Error>> {
+        let mut data: [u8; 512] = [0x00; 512];
+        let _ = p.write(&ezp_commands::create_version_cmd());
+        let read = p.read(&mut data)?;
+        return Ok(ezp_commands::process_version(&data[..read].to_vec())?);
+    }
+
+    pub fn self_test(p: &UsbProgrammer) -> Result<String, Box<dyn std::error::Error>> {
+        let mut data: [u8; 512] = [0x00; 512];
+        let _ = p.write(&ezp_commands::create_self_test_cmd());
+        let _ = p.read(&mut data)?;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let read = p.read(&mut data)?;
+        return Ok(String::from_utf8(data[..read].to_vec())?);
+    }
+
+    pub fn detect(
+        p: &UsbProgrammer,
+        chip_type: &ChipType,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let mut data: [u8; 5] = [0x00; 5];
+        let cmd = &ezp_commands::create_detect_cmd(chip_type);
+        let _ = p.write(cmd);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let read = p.read(&mut data)?;
+        return Ok(hex::encode(&data[..read]));
+    }
+
+    pub fn read(p: &UsbProgrammer, chip: &ChipDbEntry) -> Result<(), Box<dyn std::error::Error>> {
+        let mut data: [u8; 4096] = [0x00; 4096];
+        let cmd =
+            &ezp_commands::create_read_cmd(&chip.chip_type, chip.size, chip.flags(), chip.is5v());
+        let _ = p.write(cmd);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let read = p.read(&mut data)?;
+        println!("{}", hex::encode(&data[..read]));
+        //asert 110100
+        loop {
+            let read = p.read(&mut data)?;
+            println!("{}", read);
+            if read < 4096 {
+                break;
+            }
+        }
+        return Ok(());
+    }
+}
