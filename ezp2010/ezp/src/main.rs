@@ -52,9 +52,9 @@ fn mein(arg: arguments::EzpArgs) -> Result<(), Box<dyn std::error::Error>> {
                     match chip {
                         None => println!("Chip not found: {}", x.chip_type),
                         Some(chip) => {
-                            println!("writing.... {:?}", chip);
-                            
-                            
+                            println!("Writing....");
+                            let mut f = std::fs::File::open(x.file)?;
+                            programming::write(&p, &chip, &mut f)?;
                         }
                     }
                 }

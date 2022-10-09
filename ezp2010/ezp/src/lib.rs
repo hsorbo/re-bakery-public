@@ -2,8 +2,7 @@ mod arguments;
 
 pub mod ezp_common {
 
-    #[derive(Debug)]
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub enum ChipType {
         Spi,
         EE24,
@@ -69,8 +68,8 @@ pub mod ezp_commands {
         return data;
     }
 
-    pub fn process_read_cmd(resp:&[u8]) -> Result<(), Box<dyn std::error::Error>> {
-        let success: [u8;3] = [0x11,0x01,0x00];
+    pub fn process_read_cmd(resp: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        let success: [u8; 3] = [0x11, 0x01, 0x00];
         if resp != success {
             return Err(Box::new(MyError::new("No")));
         }
@@ -93,6 +92,16 @@ pub mod ezp_commands {
         data.push(0x00);
         return data;
     }
+
+    pub fn process_write_cmd(resp: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        //println!("{}",hex::encode(&resp));
+        let success: [u8; 3] = [0x12, 0x01, 0x01];
+        if resp != success {
+            return Err(Box::new(MyError::new("No")));
+        }
+        return Ok(());
+    }
+
 
     pub fn create_detect_cmd(chip_type: &ChipType) -> Vec<u8> {
         return vec![0x15, 0x00, chip_type.chip_to_u8()];
@@ -161,8 +170,7 @@ pub mod db {
         ee93_bits: u8,
     }
 
-    #[derive(Debug)]
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub struct ChipDbEntry {
         pub chip_type: ezp_common::ChipType,
         pub product_name: String,
@@ -248,14 +256,20 @@ pub mod db {
         return entries;
     }
 
-    pub fn get_by_product_name(name:&str) -> Option<ChipDbEntry> {
-        return getall().iter().find(|x| x.product_name == name).map(|f| f.clone());
+    pub fn get_by_product_name(name: &str) -> Option<ChipDbEntry> {
+        return getall()
+            .iter()
+            .find(|x| x.product_name == name)
+            .map(|f| f.clone());
     }
 }
 
 pub mod programmer {
     use itertools::Itertools;
-    use rusb::{DeviceHandle, EndpointDescriptor, GlobalContext, InterfaceDescriptor, ConfigDescriptor, Interface};
+    use rusb::{
+        ConfigDescriptor, DeviceHandle, EndpointDescriptor, GlobalContext, Interface,
+        InterfaceDescriptor,
+    };
     use std::time::Duration;
 
     pub trait Programmer {
@@ -267,7 +281,7 @@ pub mod programmer {
         pub handle: DeviceHandle<GlobalContext>,
         pub config: ConfigDescriptor,
     }
-    
+
     fn only_interface(c: &ConfigDescriptor) -> Interface {
         return c
             .interfaces()
@@ -275,23 +289,20 @@ pub mod programmer {
             .map_err(|_| "Interface not found")
             .unwrap();
     }
-    
+
     impl UsbProgrammerContext {
         pub fn open() -> Result<UsbProgrammerContext, Box<dyn std::error::Error>> {
             let mut handle =
-            rusb::open_device_with_vid_pid(0x10c4, 0xf5a0).ok_or("Programmer not found")?;
+                rusb::open_device_with_vid_pid(0x10c4, 0xf5a0).ok_or("Programmer not found")?;
             let device = handle.device();
             let config = device.config_descriptor(0)?;
-    
+
             handle.set_auto_detach_kernel_driver(true)?;
             handle.set_active_configuration(config.number())?;
-    
+
             let iface = only_interface(&config);
             handle.claim_interface(iface.number())?;
-            let k = UsbProgrammerContext {
-                handle,
-                config,
-            };
+            let k = UsbProgrammerContext { handle, config };
             return Ok(k);
         }
     }
@@ -374,7 +385,11 @@ pub mod programming {
         return Ok(hex::encode(&data[..read]));
     }
 
-    pub fn read(p: &UsbProgrammer, chip: &ChipDbEntry, writer: &mut dyn std::io::Write) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn read(
+        p: &UsbProgrammer,
+        chip: &ChipDbEntry,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut data: [u8; 4096] = [0x00; 4096];
         let cmd =
             &ezp_commands::create_read_cmd(&chip.chip_type, chip.size, chip.flags(), chip.is5v());
@@ -382,14 +397,46 @@ pub mod programming {
         std::thread::sleep(std::time::Duration::from_millis(100));
         let read = p.read(&mut data)?;
         ezp_commands::process_read_cmd(&data[..read])?;
-        
+        let mut total: usize = 0;
+
         loop {
             let read = p.read(&mut data)?;
+            total += read;
             writer.write(&data[..read])?;
             if read < 4096 {
                 break;
             }
         }
+        if total != chip.size as usize {
+            println!("Size mismatch got {} expected {}", total, chip.size);
+        }
         return Ok(());
     }
+    pub fn write(
+        p: &UsbProgrammer,
+        chip: &ChipDbEntry,
+        reader: &mut dyn std::io::Read,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut data: [u8; 4096] = [0x00; 4096];
+        let cmd =
+            &&ezp_commands::create_write_cmd(&chip.chip_type, chip.size, chip.flags(), chip.write_flag , chip.is5v());
+        let _ = p.write(cmd);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let read = p.read(&mut data)?;
+        ezp_commands::process_write_cmd(&data[..read])?;
+        let mut total: usize = 0;
+        loop {
+            let read = reader.read(&mut data)?;
+            p.write(&data[..read])?;
+            total += read;
+            if total >= chip.size as usize {
+                break;
+            }
+        }
+        if total != chip.size as usize {
+            println!("Size mismatch got {} expected {}", total, chip.size);
+        }
+        return Ok(());
+    }
+
 }
