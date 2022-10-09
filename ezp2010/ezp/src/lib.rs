@@ -27,12 +27,12 @@ pub mod ezp_commands {
     use byteorder::*;
 
     #[derive(Debug)]
-    struct MyError {
+    pub struct MyError {
         details: String,
     }
 
     impl MyError {
-        fn new(msg: &str) -> MyError {
+        pub fn new(msg: &str) -> MyError {
             MyError {
                 details: msg.to_string(),
             }
@@ -101,7 +101,6 @@ pub mod ezp_commands {
         }
         return Ok(());
     }
-
 
     pub fn create_detect_cmd(chip_type: &ChipType) -> Vec<u8> {
         return vec![0x15, 0x00, chip_type.chip_to_u8()];
@@ -418,8 +417,13 @@ pub mod programming {
         reader: &mut dyn std::io::Read,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut data: [u8; 4096] = [0x00; 4096];
-        let cmd =
-            &&ezp_commands::create_write_cmd(&chip.chip_type, chip.size, chip.flags(), chip.write_flag , chip.is5v());
+        let cmd = &&ezp_commands::create_write_cmd(
+            &chip.chip_type,
+            chip.size,
+            chip.flags(),
+            chip.write_flag,
+            chip.is5v(),
+        );
         let _ = p.write(cmd);
         std::thread::sleep(std::time::Duration::from_millis(100));
         let read = p.read(&mut data)?;
@@ -439,4 +443,32 @@ pub mod programming {
         return Ok(());
     }
 
+    pub fn erase(p: &UsbProgrammer) -> Result<(), Box<dyn std::error::Error>> {
+        //todo: guard against wrong chip
+        let cmd_start_erase: [u8; 3] = [0x14, 0x01, 0x01];
+        let start_erase_success: [u8; 3] = [0x14, 0x01, 0x01];
+
+        let cmd_erase: [u8; 3] = [0x13, 0x00, 0x01];
+        let erase_ok: [u8; 3] = [0x13, 0x01, 0x01];
+        let erase_done: [u8; 3] = [0x13, 0x01, 0x00];
+        let mut response: [u8; 3] = [0x00, 0x00, 0x00];
+
+        let _ = p.write(&cmd_start_erase);
+        let _ = p.read(&mut response)?;
+        if response != start_erase_success {
+            return Err(Box::new(crate::ezp_commands::MyError::new(
+                "Erase start fail",
+            )));
+        }
+        loop {
+            let _ = p.write(&cmd_erase);
+            let _ = p.read(&mut response)?;
+            if response == erase_done {
+                return Ok(());
+            }
+            if response != erase_ok {
+                return Err(Box::new(crate::ezp_commands::MyError::new("Erase fail")));
+            }
+        }
+    }
 }

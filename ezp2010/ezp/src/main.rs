@@ -20,7 +20,7 @@ pub fn only_interface(c: &ConfigDescriptor) -> Interface {
 
 fn mein(arg: arguments::EzpArgs) -> Result<(), Box<dyn std::error::Error>> {
     match arg.command {
-        arguments::Command::Read(_) | arguments::Command::Write(_) | arguments::Command::Info => {
+        arguments::Command::Read(_) | arguments::Command::Write(_) | arguments::Command::Info | arguments::Command::Erase => {
             let usb = ezp::programmer::UsbProgrammerContext::open()?;
             let ifdesc = only_interface(&usb.config)
                 .descriptors()
@@ -57,6 +57,10 @@ fn mein(arg: arguments::EzpArgs) -> Result<(), Box<dyn std::error::Error>> {
                             programming::write(&p, &chip, &mut f)?;
                         }
                     }
+                }
+                arguments::Command::Erase => {
+                    println!("Erasing....");
+                    programming::erase(&p)?;
                 }
                 _ => println!("noop"),
             }

@@ -20,6 +20,8 @@ pub enum Command {
     Write(ReadWriteCommand),
     /// Shows information about connected programmer
     Info,
+    /// Erase (on supported chips)
+    Erase,
     /// Shows available flash rom type
     List,
 }
