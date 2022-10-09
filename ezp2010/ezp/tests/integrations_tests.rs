@@ -31,10 +31,9 @@ mod tests {
             ("110a01000000000040000003000000", "AT25DF321"),    // SPI
             ("110a01000000000100000003000000", "W25Q128BV"),    // SPI
         ];
-        let all = db::getall().unwrap();
         for (read, name) in known {
             let data = hex::decode(read).unwrap();
-            let entry = all.iter().find(|x| x.product_name == name).unwrap();
+            let entry = db::get_by_product_name(name).unwrap();
             let got = ezp_commands::create_read_cmd(
                 &entry.chip_type,
                 entry.size,
@@ -62,11 +61,10 @@ mod tests {
             ("120c010000000000400000010003000000", "AT25DF321"),          // SPI
             ("120c010000000001000000010003000000", "W25Q128BV"),          // SPI
         ];
-        let all = db::getall().unwrap();
 
         for (read, name) in known {
             let data = hex::decode(read).unwrap();
-            let entry = all.iter().find(|x| x.product_name == name).unwrap();
+            let entry = db::get_by_product_name(name).unwrap();
             let got = ezp_commands::create_write_cmd(
                 &entry.chip_type,
                 entry.size,

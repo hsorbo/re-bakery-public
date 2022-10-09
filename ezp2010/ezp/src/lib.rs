@@ -69,6 +69,14 @@ pub mod ezp_commands {
         return data;
     }
 
+    pub fn process_read_cmd(resp:&[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        let success: [u8;3] = [0x11,0x01,0x00];
+        if resp != success {
+            return Err(Box::new(MyError::new("No")));
+        }
+        return Ok(());
+    }
+
     pub fn create_write_cmd(
         chip_type: &ChipType,
         size: u32,
@@ -247,7 +255,7 @@ pub mod db {
 
 pub mod programmer {
     use itertools::Itertools;
-    use rusb::{DeviceHandle, EndpointDescriptor, GlobalContext, InterfaceDescriptor, Device, ConfigDescriptor, Interface};
+    use rusb::{DeviceHandle, EndpointDescriptor, GlobalContext, InterfaceDescriptor, ConfigDescriptor, Interface};
     use std::time::Duration;
 
     pub trait Programmer {
@@ -257,7 +265,6 @@ pub mod programmer {
 
     pub struct UsbProgrammerContext {
         pub handle: DeviceHandle<GlobalContext>,
-        device: Device<GlobalContext>,
         pub config: ConfigDescriptor,
     }
     
@@ -283,7 +290,6 @@ pub mod programmer {
             handle.claim_interface(iface.number())?;
             let k = UsbProgrammerContext {
                 handle,
-                device,
                 config,
             };
             return Ok(k);
@@ -368,18 +374,18 @@ pub mod programming {
         return Ok(hex::encode(&data[..read]));
     }
 
-    pub fn read(p: &UsbProgrammer, chip: &ChipDbEntry) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn read(p: &UsbProgrammer, chip: &ChipDbEntry, writer: &mut dyn std::io::Write) -> Result<(), Box<dyn std::error::Error>> {
         let mut data: [u8; 4096] = [0x00; 4096];
         let cmd =
             &ezp_commands::create_read_cmd(&chip.chip_type, chip.size, chip.flags(), chip.is5v());
         let _ = p.write(cmd);
         std::thread::sleep(std::time::Duration::from_millis(100));
         let read = p.read(&mut data)?;
-        println!("{}", hex::encode(&data[..read]));
-        //asert 110100
+        ezp_commands::process_read_cmd(&data[..read])?;
+        
         loop {
             let read = p.read(&mut data)?;
-            println!("{}", read);
+            writer.write(&data[..read])?;
             if read < 4096 {
                 break;
             }

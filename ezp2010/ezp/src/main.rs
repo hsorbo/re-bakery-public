@@ -41,7 +41,9 @@ fn mein(arg: arguments::EzpArgs) -> Result<(), Box<dyn std::error::Error>> {
                     match chip {
                         None => println!("Chip not found: {}", x.chip_type),
                         Some(chip) => {
-                            println!("reading.... {:?}", chip);
+                            println!("Reading....");
+                            let mut f = std::fs::File::create(x.file)?;
+                            programming::read(&p, &chip, &mut f)?;
                         }
                     }
                 }
@@ -51,6 +53,8 @@ fn mein(arg: arguments::EzpArgs) -> Result<(), Box<dyn std::error::Error>> {
                         None => println!("Chip not found: {}", x.chip_type),
                         Some(chip) => {
                             println!("writing.... {:?}", chip);
+                            
+                            
                         }
                     }
                 }
