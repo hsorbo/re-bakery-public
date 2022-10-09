@@ -77,6 +77,22 @@ class Tests(unittest.TestCase):
             expected = bytearray.fromhex(expected_str)
             self.assertEqual(got, expected)
 
+    def test_page_size(self):
+        known = [
+            ('AT24C01', 8),
+            ('AT24C16', 16),
+            ('AT24C32', 32),
+            ('AT24C512', 128),
+            ('AT24C1024B', 256),
+            ('W25P20', 4096)
+        ]
+        print()
+        for (prod, expected) in known:
+            entries = list(filter(lambda x: x['prod'] == prod, ezp.entries))
+            self.assertEqual(len(entries), 1)
+            entry = entries[0]
+            print(entry)
+
 
 if __name__ == '__main__':
     unittest.main()
