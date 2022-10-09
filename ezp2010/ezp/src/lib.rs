@@ -1,6 +1,9 @@
+mod arguments;
+
 pub mod ezp_common {
 
     #[derive(Debug)]
+    #[derive(Clone)]
     pub enum ChipType {
         Spi,
         EE24,
@@ -151,6 +154,7 @@ pub mod db {
     }
 
     #[derive(Debug)]
+    #[derive(Clone)]
     pub struct ChipDbEntry {
         pub chip_type: ezp_common::ChipType,
         pub product_name: String,
@@ -226,14 +230,18 @@ pub mod db {
         };
         return Ok(entry);
     }
-    pub fn getall() -> Result<Vec<ChipDbEntry>, Box<dyn std::error::Error>> {
+    pub fn getall() -> Vec<ChipDbEntry> {
         let mut entries: Vec<ChipDbEntry> = vec![];
 
         for n in 0..ENTRY_COUNT {
-            let fooo = get(n)?;
+            let fooo = get(n).unwrap();
             entries.push(fooo);
         }
-        return Ok(entries);
+        return entries;
+    }
+
+    pub fn get_by_product_name(name:&str) -> Option<ChipDbEntry> {
+        return getall().iter().find(|x| x.product_name == name).map(|f| f.clone());
     }
 }
 
