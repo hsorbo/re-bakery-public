@@ -48,11 +48,11 @@ def db_read_entries(filename: str):
     f.close()
 
 
-def flags(type, size, ee24_unk, ee93_unk, ee93_bits):
+def flags(type, size, device_id, ee93_unk, ee93_bits):
     if type == 0:
         return 0x0300
     elif type == 1:
-        if (ee24_unk != 0xfe):
+        if (device_id != 0xfe):
             return 0x2400 if size > 0x800 else 0x1400
         else:
             return 0x0400
@@ -73,7 +73,7 @@ def flags_from_entry(db_entry):
 
 
 def parse_entry(entry: bytes):
-    (type, prod, vend, unk1, voltage, size, unk_write_1, unk_write_2, unk2, ee24_unk, ee93_unk, ee93_bits) = struct.unpack(
+    (type, prod, vend, unk1, voltage, size, unk_write_1, unk_write_2, manufacturer_id, ee24_unk, ee93_unk, ee93_bits) = struct.unpack(
         'I 40s 20s c b 2x I I h B B B B 26x', entry)
     # volt: 0x55 -> 85 -> 65
     # size: 0x58 -> 88 -> 68
@@ -89,7 +89,7 @@ def parse_entry(entry: bytes):
         'size': size,
         'unk_write_1': unk_write_1,
         'unk_write_2': unk_write_2,
-        'unk2': unk2,
+        'manufacturer_id': manufacturer_id,
         'ee24_unk': ee24_unk,
         'ee93_x': size / 2,
         'ee93_unk': ee93_unk,
@@ -104,14 +104,16 @@ def db_dump():
     for w in db_read_entries('database/DateBase.bin'):
 
         entry = parse_entry(w)
+        #if entry['prod'] != 'EN25F80':continue
         cats = ["spi ", "ee24", "ee25", 'ee93']
         chip_category = cats[entry['type']]
         ee24_unk = flags_from_entry(entry)
 
         # region that isnt padding nor name/vendor/type
         flags = w[64:-26]
-        print(entry)
-        print(str(binascii.hexlify(w)))
+        print('%s %s - %x,%x' % (entry['prod'],entry['vend'],entry['manufacturer_id'], entry['ee24_unk']))
+        #print(entry)
+        #print(str(binascii.hexlify(w)))
         #print(str(entry['unk2']) + " " + entry['prod'])
         #print(str(binascii.hexlify(flags, " ", 1)) + " " + entry['prod'])
 

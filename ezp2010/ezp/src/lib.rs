@@ -104,11 +104,19 @@ pub mod ezp_commands {
 
     pub fn create_detect_cmd(chip_type: &ChipType) -> Vec<u8> {
         return vec![0x15, 0x00, chip_type.chip_to_u8()];
-        // found EN25F80 15021c130b
-        //               15021c1317
-        //               15021c131f
-        //               15021c1320 -> 1c13
-        // Detect chip error! = b'\x15\x01\x02'
+    }
+
+    pub fn process_detect_cmd(resp: &[u8]) -> Result<(u8,u8), Box<dyn std::error::Error>> {
+        let found: [u8; 2] = [0x15, 0x02];
+        if resp[..2] != found {
+            return Err(Box::new(MyError::new("Detect chip error!")));
+        }
+        //chip_type: &ChipType
+        return Ok((resp[2], resp[3]));
+        //cmp     al, 0FFh, check if manufactor is != 0xff
+
+        //ManufacturerID:%X\r\nDeviceID:%X
+        //ManufacturerID: 1c DeviceID: 13
     }
 
     pub fn create_version_cmd() -> Vec<u8> {
@@ -163,8 +171,8 @@ pub mod db {
         size: u32,
         write_1: u32,
         write_2: u16,
-        _unknown2: u8,
-        ee24_unk: u8,
+        manufacturer_id: u8,
+        device_id: u8,
         ee93_unk: u8,
         ee93_bits: u8,
     }
@@ -176,7 +184,8 @@ pub mod db {
         pub vendor_name: String,
         pub size: u32,
         pub voltage: u8,
-        //pub ee24_unk: u8,
+        pub device_id: u8,
+        pub manufacturer_id: u8,
         pub ee93_unk: u8,
         pub ee93_bits: u8,
         pub write_flag: Option<u16>,
@@ -233,11 +242,12 @@ pub mod db {
             chip_type: to_chiptype(s.chip_type),
             size: s.size as u32,
             voltage: s.voltage,
+            manufacturer_id: s.manufacturer_id,
             product_name: parse_string(&s.product_name)?.into(),
             vendor_name: parse_string(&s.vendor_name)?.into(),
             ee93_bits: s.ee93_bits,
             ee93_unk: s.ee93_unk,
-            //ee24_unk: s.ee24_unk,
+            device_id: s.device_id,
             write_flag: match s.write_1 {
                 0x00 => None,
                 _ => Some(s.write_2),
@@ -372,16 +382,16 @@ pub mod programming {
         return Ok(String::from_utf8(data[..read].to_vec())?);
     }
 
-    pub fn detect(
-        p: &UsbProgrammer,
-        chip_type: &ChipType,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn detect(p: &UsbProgrammer) -> Result<String, Box<dyn std::error::Error>> {
         let mut data: [u8; 5] = [0x00; 5];
-        let cmd = &ezp_commands::create_detect_cmd(chip_type);
+        let cmd = &ezp_commands::create_detect_cmd(&ChipType::Spi);
         let _ = p.write(cmd);
         std::thread::sleep(std::time::Duration::from_millis(100));
-        let read = p.read(&mut data)?;
-        return Ok(hex::encode(&data[..read]));
+        let _ = p.read(&mut data)?;
+        let (man,dev) = ezp_commands::process_detect_cmd(&data)?;
+        let all = crate::db::getall();
+        let k = all.iter().find(|x| x.device_id == dev && x.manufacturer_id == man).ok_or("not d")?;
+        return Ok(k.product_name.clone());
     }
 
     pub fn read(
