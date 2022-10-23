@@ -1,0 +1,3 @@
+brew install mdbtools
+mdb-schema login.dat 
+mdb-export login.dat ChipName > ChipName.csv
