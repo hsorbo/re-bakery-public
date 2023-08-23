@@ -1,0 +1,27 @@
+ezp2019,ezp2019+,ezp2023+ = same ish
+
+
+EZP
+
+https://docs.rs/packed_struct/latest/packed_struct/
+indikator: https://github.com/console-rs/indicatif
+
+NOK 178.42  10％ Off | New EZP2013 high-speed USB SPI Programmer Better than EZP2010 support 32M Flash 24 25 93 EEPROM 25 flash bios eeprom programmer
+https://a.aliexpress.com/_mMHpLxe
+
+If I may be allowed to take a detour...
+
+EZP2010  = C8051F340 
+EZP2013  = ?
+EZP2019  = ?
+EZP2019+ = CH552G
+EZP2020  = CH552G, different firmware?
+
+Are there other chip or circuit differences?
+
+
+EZP2010  = C8051F340 - DeviceID  = "VID_10C4&PID_F5A0"
+EZP2013  = C8051F340
+EZP2019  = CH554G
+EZP2019+ = CH552G - DeviceID    = "VID_1FC8&PID_310B"
+EZP2020  = CH552G  - DeviceID    = "VID_1FC8&PID_300B"
